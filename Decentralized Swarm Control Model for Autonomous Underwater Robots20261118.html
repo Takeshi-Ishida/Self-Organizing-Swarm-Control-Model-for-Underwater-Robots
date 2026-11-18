@@ -1,0 +1,981 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Underwater Robot Swarm Control Simulation (Ishida Model) - Robust Control Version</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overscroll-behavior: none;
+            user-select: none;
+        }
+        .slider-label { @apply text-xs font-medium text-gray-400 uppercase tracking-wider; }
+        .slider-value { @apply text-sm font-mono font-bold text-blue-400; }
+        input[type="range"] {
+            -webkit-appearance: none; appearance: none;
+            width: 100%; height: 4px; background: #2d3748;
+            border-radius: 2px; outline: none; transition: opacity .2s;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; appearance: none;
+            width: 16px; height: 16px; background: #4299e1;
+            cursor: pointer; border-radius: 50%;
+            border: 2px solid #1a202c; transition: transform 0.1s;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2); background: #63b3ed;
+        }
+        
+        .knob-container {
+            position: relative; width: 80px; height: 80px;
+            border-radius: 50%; background: #2d3748;
+            border: 2px solid #4a5568; cursor: pointer; touch-action: none;
+        }
+        .knob-arrow {
+            position: absolute; top: 50%; left: 50%; width: 50%; height: 2px;
+            background: transparent; transform-origin: 0% 50%; pointer-events: none;
+        }
+        .knob-arrow::after {
+            content: ''; position: absolute; right: 10px; top: -4px;
+            width: 0; height: 0; 
+            border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 10px solid #ef4444;
+        }
+        .knob-indicator {
+             position: absolute; inset: 0; border-radius: 50%;
+             background: radial-gradient(circle, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 70%);
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #1f2937; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+        input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none; margin: 0; 
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 flex flex-col lg:flex-row h-screen overflow-hidden">
+
+    <div class="relative flex-1 bg-gray-900 flex flex-col items-center justify-center p-4 overflow-hidden">
+        
+        <div class="absolute top-4 left-4 bg-gray-800/80 backdrop-blur-sm p-3 rounded-lg border border-gray-700 z-10 shadow-lg">
+            <h2 class="text-sm font-bold text-gray-200 flex items-center gap-2">
+                <i data-lucide="activity" class="w-4 h-4 text-blue-400"></i>
+                <span id="modeDisplay">Boids Model</span>
+            </h2>
+            <div class="text-xs text-gray-400 mt-1">Steps: 
+                <span id="iterationCounter" class="font-mono text-white">0</span> / 
+                <span id="maxIterDisplayOverlay" class="font-mono text-gray-500">2000</span>
+            </div>
+            <div class="text-xs text-gray-400">Robots: <span id="fishCountDisplay" class="font-mono text-white">80</span></div>
+            
+            <div id="analysisOverlay" class="mt-3 pt-3 border-t border-gray-600 hidden">
+                <div class="text-xs font-bold text-emerald-400 mb-1">Swarm Analysis (Real-time)</div>
+                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-[10px] text-gray-300">
+                    <div>Total Swarms:</div><div class="font-mono text-right text-white" id="overlaySwarmCount">-</div>
+                    <div>Overall Mean P̄:</div><div class="font-mono text-right text-white" id="overlayAvgP">-</div>
+                </div>
+            </div>
+        </div>
+
+        <div id="ishidaLegend" class="absolute bottom-4 left-4 bg-gray-800/80 backdrop-blur-sm p-3 rounded-lg border border-gray-700 z-10 hidden">
+             <div class="text-xs font-bold mb-2 text-gray-300">Potential (P̄) Color</div>
+             <div class="flex items-center gap-2 text-xs">
+                 <div class="w-20 h-2 rounded bg-gradient-to-r from-blue-600 via-gray-400 to-red-500"></div>
+             </div>
+             <div class="flex justify-between text-[10px] text-gray-400 w-20 mt-1">
+                 <span>Low</span><span>High</span>
+             </div>
+             <div class="mt-2 text-[10px] text-emerald-400 flex items-center gap-1">
+                 <div class="w-2 h-2 rounded-full border border-emerald-500 bg-emerald-500/20"></div>
+                 <span>Swarm Detection</span>
+             </div>
+        </div>
+
+        <canvas id="simulationCanvas" class="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 cursor-crosshair max-w-full max-h-full"></canvas>
+    </div>
+
+    <div class="w-full lg:w-[400px] bg-gray-900 border-l border-gray-800 flex flex-col h-[40vh] lg:h-full">
+        
+        <div class="p-4 border-b border-gray-800 bg-gray-900 z-10">
+            <h1 class="text-lg font-bold text-white tracking-tight">Swarm Control Simulator</h1>
+            <p class="text-[10px] text-gray-500 mt-1">Ishida Model & Boids Algorithm + Robust Potential Averaging</p>
+        </div>
+
+        <div class="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
+            
+            <div class="bg-gray-800 p-1 rounded-lg flex text-sm font-medium">
+                <button id="modeBoids" class="flex-1 py-2 rounded-md bg-blue-600 text-white shadow-sm transition-all text-xs">Boids</button>
+                <button id="modeIshida" class="flex-1 py-2 rounded-md text-gray-400 hover:text-white transition-all text-xs">Ishida Model (Robot)</button>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2">
+                <button id="startButton" class="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-md transition-colors text-xs font-bold">
+                    <i data-lucide="play" class="w-3 h-3"></i> Start
+                </button>
+                <button id="stopButton" class="flex items-center justify-center gap-2 bg-amber-600 hover:bg-amber-700 text-white py-2 rounded-md transition-colors text-xs font-bold">
+                    <i data-lucide="pause" class="w-3 h-3"></i> Stop
+                </button>
+                <button id="resetButton" class="flex items-center justify-center gap-2 bg-gray-700 hover:bg-gray-600 text-white py-2 rounded-md transition-colors text-xs font-bold">
+                    <i data-lucide="rotate-ccw" class="w-3 h-3"></i> Reset
+                </button>
+            </div>
+
+            <div class="space-y-4 bg-gray-800/40 p-3 rounded-lg border border-gray-700/50">
+                <div>
+                    <h3 class="text-xs font-semibold text-gray-300 flex items-center gap-2 mb-2">
+                        <i data-lucide="sliders" class="w-3 h-3"></i> Execution Control & Random Seed
+                    </h3>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-[10px] text-gray-400 block mb-1">Max Steps</label>
+                            <input type="number" id="maxIterationInput" value="2000" min="10" step="10" class="w-full bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white font-mono focus:outline-none focus:border-blue-500 transition-colors">
+                        </div>
+                        <div>
+                            <label class="text-[10px] text-gray-400 block mb-1">Random Seed</label>
+                            <input type="number" id="randomSeedInput" value="12345" class="w-full bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white font-mono focus:outline-none focus:border-blue-500 transition-colors">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="pt-2 border-t border-gray-700/50">
+                    <h3 class="text-xs font-semibold text-blue-300 flex items-center gap-2 mb-2">
+                        <i data-lucide="download" class="w-3 h-3"></i> Data & Image Export Settings
+                    </h3>
+                    <div>
+                        <label class="text-[10px] text-gray-400 block mb-1">Image Export Interval (Steps) *0 to disable</label>
+                        <input type="number" id="imageIntervalInput" value="200" min="0" step="10" class="w-full bg-gray-900 border border-gray-700 rounded p-1.5 text-xs text-white font-mono focus:outline-none focus:border-blue-500 transition-colors">
+                    </div>
+                    <p class="text-[10px] text-gray-500 mt-1.5 leading-tight">
+                        <span class="text-amber-500/80">*A unique timestamped filename is generated for each run.</span> CSV files (parameters and time-series data) are automatically downloaded upon reaching the maximum step count.
+                    </p>
+                </div>
+            </div>
+
+            <div id="analysisPanel" class="hidden">
+                 <div class="bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden">
+                    <div class="bg-gray-800 px-3 py-2 border-b border-gray-700 flex justify-between items-center">
+                        <h3 class="text-xs font-bold text-emerald-400 flex items-center gap-2">
+                            <i data-lucide="bar-chart-2" class="w-3 h-3"></i> Quantitative Evaluation Metrics
+                        </h3>
+                        <span class="text-[10px] text-gray-500">Algorithm: Connected Components</span>
+                    </div>
+                    
+                    <div class="p-3 grid grid-cols-2 gap-2 text-xs border-b border-gray-700/50">
+                        <div class="bg-gray-900/50 p-2 rounded">
+                            <div class="text-gray-500">Total Swarms</div>
+                            <div class="text-xl font-mono text-white" id="statSwarmCount">0</div>
+                        </div>
+                        <div class="bg-gray-900/50 p-2 rounded">
+                            <div class="text-gray-500">Overall Mean P̄</div>
+                            <div class="text-xl font-mono text-white" id="statAvgP">0.00</div>
+                        </div>
+                    </div>
+
+                    <div class="max-h-40 overflow-y-auto custom-scrollbar">
+                        <table class="w-full text-[10px] text-left">
+                            <thead class="bg-gray-800 text-gray-400 sticky top-0">
+                                <tr>
+                                    <th class="p-2">ID</th>
+                                    <th class="p-2">Count</th>
+                                    <th class="p-2">Radius (px)</th>
+                                    <th class="p-2">Density</th>
+                                    <th class="p-2">Mean P̄</th>
+                                </tr>
+                            </thead>
+                            <tbody id="swarmTableBody" class="divide-y divide-gray-700 text-gray-300 font-mono">
+                                <tr><td colspan="5" class="p-2 text-center text-gray-600">No swarms detected</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                 </div>
+            </div>
+
+            <hr class="border-gray-800">
+
+            <div class="space-y-4">
+                <h3 class="text-xs font-semibold text-gray-300 flex items-center gap-2">
+                    <i data-lucide="settings-2" class="w-3 h-3"></i> Common Settings
+                </h3>
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <label class="slider-label">Number of Robots</label>
+                        <span id="fishNumValue" class="slider-value">80</span>
+                    </div>
+                    <input type="range" id="fishNumSlider" min="10" max="300" value="80">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <label class="slider-label">Mean Speed</label>
+                        <span id="meanSpeedValue" class="slider-value">1.2</span>
+                    </div>
+                    <input type="range" id="meanSpeedSlider" min="0.5" max="8" value="1.2" step="0.1">
+                </div>
+            </div>
+
+            <hr class="border-gray-800">
+
+            <div id="controlsBoids" class="space-y-4">
+                <h3 class="text-xs font-semibold text-blue-400 flex items-center gap-2">
+                    <i data-lucide="fish" class="w-3 h-3"></i> Boids Rules
+                </h3>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label">Separation</label><span id="repulsiveValue" class="slider-value">10</span></div>
+                    <input type="range" id="repulsiveSlider" min="5" max="50" value="10">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label">Alignment</label><span id="parallelValue" class="slider-value">60</span></div>
+                    <input type="range" id="parallelSlider" min="10" max="150" value="60">
+                </div>
+                 <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label">Cohesion</label><span id="attractionValue" class="slider-value">140</span></div>
+                    <input type="range" id="attractionSlider" min="50" max="300" value="140">
+                </div>
+            </div>
+
+            <div id="controlsIshida" class="space-y-4 hidden">
+                <h3 class="text-xs font-semibold text-emerald-400 flex items-center gap-2">
+                    <i data-lucide="cpu" class="w-3 h-3"></i> Ishida Model (Robot Control)
+                </h3>
+
+                <div class="bg-gray-800/50 p-3 rounded-lg flex items-center justify-between border border-gray-700">
+                    <div>
+                        <div class="text-[10px] font-medium text-gray-400 mb-1">Command Direction</div>
+                        <div class="text-lg font-bold text-red-400 font-mono" id="cmdAngleDisplay">0°</div>
+                    </div>
+                    <div class="knob-container scale-75 origin-right" id="directionKnob">
+                        <div class="knob-indicator"></div>
+                        <div class="knob-arrow" id="knobArrow"></div>
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <div class="flex justify-between mb-1"><label class="slider-label text-emerald-200">Acoustic Range (Outer)</label><span id="range1Value" class="slider-value">120</span></div>
+                    <input type="range" id="range1Slider" min="20" max="200" value="120">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label text-blue-200">Radio Range (Inner)</label><span id="range2Value" class="slider-value">60</span></div>
+                    <input type="range" id="range2Slider" min="5" max="100" value="60">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label">Morphological Parameter (w)</label><span id="ishidaWValue" class="slider-value">0.5</span></div>
+                    <input type="range" id="ishidaWSlider" min="0.1" max="2.0" value="0.5" step="0.05">
+                </div>
+
+                <hr class="border-gray-800">
+                <h4 class="text-[10px] font-bold text-gray-400">Behavior Control & Analysis Parameters</h4>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label">Command Mixing Weight (Mix Weight)</label><span id="mixWeightValue" class="slider-value">0.2</span></div>
+                    <input type="range" id="mixWeightSlider" min="0.0" max="1.0" value="0.2" step="0.05">
+                </div>
+
+                <hr class="border-gray-800">
+                <h4 class="text-[10px] font-bold text-cyan-300/90">Robust Control Parameters</h4>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label">Potential Time-Averaging Coefficient α</label><span id="potentialAlphaValue" class="slider-value">0.20</span></div>
+                    <input type="range" id="potentialAlphaSlider" min="0.01" max="1.00" value="0.20" step="0.01">
+                    <p class="text-[10px] text-gray-500 mt-1">P̄<sub>t</sub> = (1-α)P̄<sub>t-1</sub> + αP<sub>t</sub>. Smaller values provide stronger smoothing against communication dropouts.</p>
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label">Stable State Entry Threshold (P̄_enter)</label><span id="pEnterValue" class="slider-value">1.5</span></div>
+                    <input type="range" id="pEnterSlider" min="-5" max="10" value="1.5" step="0.1">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label">Stable State Exit Threshold (P̄_exit)</label><span id="pExitValue" class="slider-value">1.0</span></div>
+                    <input type="range" id="pExitSlider" min="-5" max="10" value="1.0" step="0.1">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label">Consecutive Drops for Large Turn</label><span id="negDeltaLimitValue" class="slider-value">3</span></div>
+                    <input type="range" id="negDeltaLimitSlider" min="1" max="10" value="3" step="1">
+                    <p class="text-[10px] text-gray-500 mt-1">Turns 0–60° after 1–2 drops in P̄, and 90–180° after the specified consecutive drops.</p>
+                </div>
+
+                <hr class="border-gray-800">
+                <h4 class="text-[10px] font-bold text-amber-500/80">Communication & Noise Settings (Probability)</h4>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label text-amber-200">Command Arrival Probability</label><span id="cmdSuccessValue" class="slider-value">1.00</span></div>
+                    <input type="range" id="cmdSuccessSlider" min="0.0" max="1.0" value="1.0" step="0.01">
+                </div>
+                <div>
+                    <div class="flex justify-between mb-1"><label class="slider-label text-amber-200">Communication Success Rate</label><span id="commSuccessValue" class="slider-value">1.00</span></div>
+                    <input type="range" id="commSuccessSlider" min="0.0" max="1.0" value="1.0" step="0.01">
+                </div>
+            </div>
+        </div>
+        
+        <div class="p-3 border-t border-gray-800 text-[10px] text-gray-600 bg-gray-900">
+            Based on Boids & Ishida Model (2018)<br>
+            Analysis: Connected Component Labeling<br>
+            Robust control: EMA of P, hysteresis, consecutive ΔP̄ detection<br>
+            RNG: Xorshift Algorithm
+        </div>
+    </div>
+
+    <script>
+        class XorShift {
+            constructor(seed = 12345) {
+                this.w = seed || 12345;
+                this.x = 123456789;
+                this.y = 362436069;
+                this.z = 521288629;
+            }
+            next() {
+                let t = this.x ^ (this.x << 11);
+                this.x = this.y;
+                this.y = this.z;
+                this.z = this.w;
+                this.w = (this.w ^ (this.w >>> 19)) ^ (t ^ (t >>> 8));
+                return this.w;
+            }
+            random() {
+                return (this.next() >>> 0) / 4294967296;
+            }
+        }
+
+        let rng = new XorShift(12345);
+        lucide.createIcons();
+
+        let timeSeriesData = [];
+        let IMAGE_INTERVAL = 200;
+        let currentRunId = ""; // Unique timestamp identifier for each simulation run
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const canvas = document.getElementById('simulationCanvas');
+            const ctx = canvas.getContext('2d');
+
+            const AREA = 800; 
+            const PICH = 14;  
+            
+            let MODE = 'BOIDS'; 
+            let FISH_NUM = 80;  
+            let MEAN_SPEED = 1.2; 
+
+            let BOIDS_R = 10;   
+            let BOIDS_P = 60;   
+            let BOIDS_A = 140;  
+
+            let RANGE1_FACTOR = 120; 
+            let RANGE2_FACTOR = 60;  
+            let ISHIDA_W = 0.5;     
+            let CMD_ANGLE = 0;      
+            let MIX_WEIGHT = 0.2;   
+            let POTENTIAL_EMA_ALPHA = 0.20;
+            let P_STABLE_ENTER = 1.5;
+            let P_STABLE_EXIT = 1.0;
+            let NEGATIVE_DELTA_LIMIT = 3;
+            const SOFT_TURN_MAX_DEG = 60;
+            const HARD_TURN_MIN_DEG = 90;
+            const HARD_TURN_MAX_DEG = 180;
+            const DELTA_P_EPSILON = 0.0;
+
+            let CMD_SUCCESS_RATE = 1.0;
+            let COMM_SUCCESS_RATE = 1.0;
+            let MAX_ITERATIONS = 2000;
+            let CURRENT_SEED = 12345;
+
+            let fishes = [];      
+            let isRunning = false; 
+            let animationFrameId; 
+            let iterate = 0;      
+            let swarmData = [];   
+
+            const startBtn = document.getElementById('startButton');
+            const stopBtn = document.getElementById('stopButton');
+            const resetBtn = document.getElementById('resetButton');
+            const modeBoidsBtn = document.getElementById('modeBoids');
+            const modeIshidaBtn = document.getElementById('modeIshida');
+            const modeDisplay = document.getElementById('modeDisplay');
+            const controlsBoids = document.getElementById('controlsBoids');
+            const controlsIshida = document.getElementById('controlsIshida');
+            const ishidaLegend = document.getElementById('ishidaLegend');
+            const analysisOverlay = document.getElementById('analysisOverlay');
+            const analysisPanel = document.getElementById('analysisPanel');
+            
+            const overlaySwarmCount = document.getElementById('overlaySwarmCount');
+            const overlayAvgP = document.getElementById('overlayAvgP');
+            const statSwarmCount = document.getElementById('statSwarmCount');
+            const statAvgP = document.getElementById('statAvgP');
+            const swarmTableBody = document.getElementById('swarmTableBody');
+
+            const maxIterationInput = document.getElementById('maxIterationInput');
+            const randomSeedInput = document.getElementById('randomSeedInput');
+            const imageIntervalInput = document.getElementById('imageIntervalInput');
+            const iterationCounter = document.getElementById('iterationCounter');
+            const maxIterDisplayOverlay = document.getElementById('maxIterDisplayOverlay');
+
+            const directionKnob = document.getElementById('directionKnob');
+            const knobArrow = document.getElementById('knobArrow');
+            const cmdAngleDisplay = document.getElementById('cmdAngleDisplay');
+
+            const normAngle = (angle) => {
+                while (angle > 180) angle -= 360;
+                while (angle <= -180) angle += 360;
+                return angle;
+            };
+
+            const degToRad = (deg) => deg * (Math.PI / 180);
+            const radToDeg = (rad) => rad * (180 / Math.PI);
+
+            let spareRandom = null;
+            function randomGaussian() {
+                if (spareRandom !== null) {
+                    const val = spareRandom; spareRandom = null; return val;
+                }
+                let u, v, s;
+                do {
+                    u = rng.random() * 2 - 1; v = rng.random() * 2 - 1; s = u * u + v * v;
+                } while (s >= 1 || s === 0);
+                s = Math.sqrt(-2.0 * Math.log(s) / s);
+                spareRandom = v * s; return u * s;
+            }
+
+            function getDistance(f1, f2) {
+                let dx = f2.x - f1.x; let dy = f2.y - f1.y;
+                if (Math.abs(dx) > AREA / 2) dx = dx > 0 ? dx - AREA : dx + AREA;
+                if (Math.abs(dy) > AREA / 2) dy = dy > 0 ? dy - AREA : dy + AREA;
+                return { dist: Math.sqrt(dx * dx + dy * dy), dx, dy };
+            }
+
+            // Generate timestamp string for unique filenames
+            function getTimestampString() {
+                const now = new Date();
+                const yyyy = now.getFullYear();
+                const MM = String(now.getMonth() + 1).padStart(2, '0');
+                const dd = String(now.getDate()).padStart(2, '0');
+                const hh = String(now.getHours()).padStart(2, '0');
+                const mm = String(now.getMinutes()).padStart(2, '0');
+                const ss = String(now.getSeconds()).padStart(2, '0');
+                return `${yyyy}${MM}${dd}_${hh}${mm}${ss}`;
+            }
+
+            function init() {
+                MAX_ITERATIONS = parseInt(maxIterationInput.value) || 2000;
+                CURRENT_SEED = parseInt(randomSeedInput.value) || 12345;
+                IMAGE_INTERVAL = parseInt(imageIntervalInput.value) || 0;
+                timeSeriesData = [];
+                maxIterDisplayOverlay.textContent = MAX_ITERATIONS;
+                
+                // Assign a unique timestamp ID for each run
+                currentRunId = getTimestampString();
+                
+                rng = new XorShift(CURRENT_SEED);
+                spareRandom = null;
+
+                const container = canvas.parentElement;
+                canvas.width = container.clientWidth;
+                canvas.height = container.clientHeight;
+                
+                fishes = [];
+                for (let i = 0; i < FISH_NUM; i++) {
+                    fishes.push({
+                        id: i, x: rng.random() * AREA, y: rng.random() * AREA, speed: MEAN_SPEED,
+                        angle: rng.random() * 360 - 180,
+                        rawPotential: 0,
+                        prevPotential: 0,              // compatibility: previous smoothed potential
+                        currentPotential: 0,           // smoothed potential Pbar used for display/analysis
+                        prevSmoothedPotential: 0,
+                        smoothedPotential: 0,
+                        negativeDeltaCount: 0,
+                        isPotentialStable: false,
+                        lastTurnTime: 0,
+                        swarmId: 0
+                    });
+                }
+                iterate = 0; swarmData = [];
+                iterationCounter.textContent = '0';
+                updateStatsUI(); draw();
+            }
+
+            function analyzeSwarms() {
+                const GRID_RES = 20; 
+                const GRID_SIZE = Math.ceil(AREA / GRID_RES); 
+                let grid = new Int32Array(GRID_SIZE * GRID_SIZE).fill(0);
+                
+                fishes.forEach(f => {
+                    f.swarmId = 0; 
+                    if (f.isPotentialStable) {
+                        const gx = Math.floor(f.x / GRID_RES);
+                        const gy = Math.floor(f.y / GRID_RES);
+                        const safeGx = (gx + GRID_SIZE) % GRID_SIZE;
+                        const safeGy = (gy + GRID_SIZE) % GRID_SIZE;
+                        grid[safeGy * GRID_SIZE + safeGx] = 1; 
+                    }
+                });
+
+                let labels = new Int32Array(GRID_SIZE * GRID_SIZE).fill(0);
+                let currentLabel = 1;
+                let visited = new Int32Array(GRID_SIZE * GRID_SIZE).fill(0);
+
+                for (let y = 0; y < GRID_SIZE; y++) {
+                    for (let x = 0; x < GRID_SIZE; x++) {
+                        let idx = y * GRID_SIZE + x;
+                        if (grid[idx] === 1 && visited[idx] === 0) {
+                            let label = currentLabel++;
+                            let queue = [[x, y]];
+                            visited[idx] = 1; labels[idx] = label;
+
+                            while (queue.length > 0) {
+                                let [cx, cy] = queue.pop();
+                                for (let dy = -1; dy <= 1; dy++) {
+                                    for (let dx = -1; dx <= 1; dx++) {
+                                        if (dx === 0 && dy === 0) continue;
+                                        let nx = (cx + dx + GRID_SIZE) % GRID_SIZE;
+                                        let ny = (cy + dy + GRID_SIZE) % GRID_SIZE;
+                                        let nidx = ny * GRID_SIZE + nx;
+                                        if (grid[nidx] === 1 && visited[nidx] === 0) {
+                                            visited[nidx] = 1; labels[nidx] = label; queue.push([nx, ny]);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                let swarms = {};
+                let totalPotentialSum = 0;
+
+                fishes.forEach(f => {
+                    totalPotentialSum += f.currentPotential;
+                    if (f.isPotentialStable) {
+                        const gx = Math.floor(f.x / GRID_RES);
+                        const gy = Math.floor(f.y / GRID_RES);
+                        const safeGx = (gx + GRID_SIZE) % GRID_SIZE;
+                        const safeGy = (gy + GRID_SIZE) % GRID_SIZE;
+                        const label = labels[safeGy * GRID_SIZE + safeGx];
+                        
+                        if (label > 0) {
+                            f.swarmId = label;
+                            if (!swarms[label]) swarms[label] = { id: label, fish: [], totalP: 0 };
+                            swarms[label].fish.push(f);
+                            swarms[label].totalP += f.currentPotential;
+                        }
+                    }
+                });
+
+                swarmData = Object.values(swarms).map(s => {
+                    const count = s.fish.length; const avgP = s.totalP / count;
+                    let sumSinX = 0, sumCosX = 0, sumSinY = 0, sumCosY = 0;
+                    let sumVx = 0, sumVy = 0; 
+                    
+                    s.fish.forEach(f => {
+                        let angX = (f.x / AREA) * Math.PI * 2; let angY = (f.y / AREA) * Math.PI * 2;
+                        sumSinX += Math.sin(angX); sumCosX += Math.cos(angX);
+                        sumSinY += Math.sin(angY); sumCosY += Math.cos(angY);
+                        sumVx += Math.cos(degToRad(f.angle)); sumVy += Math.sin(degToRad(f.angle));
+                    });
+
+                    let avgAngX = Math.atan2(sumSinX, sumCosX); let avgAngY = Math.atan2(sumSinY, sumCosY);
+                    let cx = (avgAngX / (Math.PI * 2)) * AREA; let cy = (avgAngY / (Math.PI * 2)) * AREA;
+                    if (cx < 0) cx += AREA; if (cy < 0) cy += AREA;
+
+                    let sumDistSq = 0;
+                    s.fish.forEach(f => {
+                        let dx = Math.abs(f.x - cx); let dy = Math.abs(f.y - cy);
+                        if (dx > AREA/2) dx = AREA - dx; if (dy > AREA/2) dy = AREA - dy;
+                        sumDistSq += (dx*dx + dy*dy);
+                    });
+                    
+                    const radius = Math.sqrt(sumDistSq / count); 
+                    const safeR = Math.max(1, radius); 
+                    const density = count / (Math.PI * safeR * safeR); 
+                    const avgVx = sumVx / count; const avgVy = sumVy / count;
+
+                    return { id: s.id, count: count, radius: radius, density: density, avgP: avgP, cx: cx, cy: cy, avgVx: avgVx, avgVy: avgVy };
+                });
+
+                swarmData.sort((a, b) => b.count - a.count);
+                return totalPotentialSum / fishes.length; 
+            }
+
+            function saveCanvasImage(filename) {
+                const dataURL = canvas.toDataURL('image/png');
+                const link = document.createElement('a');
+                link.href = dataURL; link.download = filename;
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            }
+
+            function recordTimeSeriesData(step, globalAvgP) {
+                if (swarmData.length === 0) {
+                    timeSeriesData.push([step, 0, globalAvgP.toFixed(4), '', '', '', '', '', '', '']);
+                } else {
+                    swarmData.forEach(s => {
+                        timeSeriesData.push([
+                            step, swarmData.length, globalAvgP.toFixed(4),
+                            s.id, s.count, s.radius.toFixed(2), s.density.toFixed(4), s.avgP.toFixed(4), s.avgVx.toFixed(4), s.avgVy.toFixed(4)
+                        ]);
+                    });
+                }
+            }
+
+            // Append unique run ID (currentRunId) to filename
+            function exportParametersCSV() {
+                const bom = new Uint8Array([0xEF, 0xBB, 0xBF]); 
+                let csvContent = "Parameter,Value\n";
+                csvContent += `Mode,${MODE}\n`;
+                csvContent += `Max Iterations,${MAX_ITERATIONS}\n`;
+                csvContent += `Random Seed,${CURRENT_SEED}\n`;
+                csvContent += `Run ID,${currentRunId}\n`; // Record run ID inside CSV as well
+                csvContent += `Fish Num,${FISH_NUM}\n`;
+                csvContent += `Mean Speed,${MEAN_SPEED}\n`;
+                if (MODE === 'ISHIDA') {
+                    csvContent += `Sound Range (Outer),${RANGE1_FACTOR}\n`;
+                    csvContent += `Radio Range (Inner),${RANGE2_FACTOR}\n`;
+                    csvContent += `Ishida W,${ISHIDA_W}\n`;
+                    csvContent += `Command Angle,${CMD_ANGLE}\n`;
+                    csvContent += `Mix Weight,${MIX_WEIGHT}\n`;
+                    csvContent += `P Threshold,${P_STABLE_ENTER}\n`; // legacy name for result viewer compatibility
+                    csvContent += `Potential EMA Alpha,${POTENTIAL_EMA_ALPHA}\n`;
+                    csvContent += `P Stable Enter Threshold,${P_STABLE_ENTER}\n`;
+                    csvContent += `P Stable Exit Threshold,${P_STABLE_EXIT}\n`;
+                    csvContent += `Negative Delta Limit,${NEGATIVE_DELTA_LIMIT}\n`;
+                    csvContent += `Soft Turn Max Deg,${SOFT_TURN_MAX_DEG}\n`;
+                    csvContent += `Hard Turn Min Deg,${HARD_TURN_MIN_DEG}\n`;
+                    csvContent += `Hard Turn Max Deg,${HARD_TURN_MAX_DEG}\n`;
+                    csvContent += `Command Success Rate,${CMD_SUCCESS_RATE}\n`;
+                    csvContent += `Communication Success Rate,${COMM_SUCCESS_RATE}\n`;
+                } else {
+                    csvContent += `Boids Repulsive (R),${BOIDS_R}\n`;
+                    csvContent += `Boids Parallel (P),${BOIDS_P}\n`;
+                    csvContent += `Boids Attraction (A),${BOIDS_A}\n`;
+                }
+                
+                const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `parameters_seed${CURRENT_SEED}_${currentRunId}.csv`;
+                link.click();
+            }
+
+            // Append unique run ID (currentRunId) to filename
+            function exportTimeSeriesCSV() {
+                const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+                let csvContent = "Step,Global Swarm Count,Global Avg Pbar,Swarm ID,Count,Radius,Density,Swarm Avg Pbar,Avg Vector X,Avg Vector Y\n";
+                timeSeriesData.forEach(row => { csvContent += row.join(",") + "\n"; });
+                
+                const blob = new Blob([bom, csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `timeseries_seed${CURRENT_SEED}_${currentRunId}.csv`;
+                link.click();
+            }
+
+            function updateStatsUI(globalAvgP = 0) {
+                overlaySwarmCount.textContent = swarmData.length;
+                overlayAvgP.textContent = globalAvgP.toFixed(2);
+                statSwarmCount.textContent = swarmData.length;
+                statAvgP.textContent = globalAvgP.toFixed(2);
+
+                swarmTableBody.innerHTML = '';
+                if (swarmData.length === 0) {
+                    swarmTableBody.innerHTML = `<tr><td colspan="5" class="p-2 text-center text-gray-600">No active swarms (P̄ enter: ${P_STABLE_ENTER}, exit: ${P_STABLE_EXIT})</td></tr>`;
+                } else {
+                    swarmData.forEach(s => {
+                        const tr = document.createElement('tr');
+                        tr.innerHTML = `<td class="p-2 text-emerald-400">#${s.id}</td><td class="p-2">${s.count}</td><td class="p-2">${s.radius.toFixed(1)}</td><td class="p-2">${s.density.toFixed(4)}</td><td class="p-2">${s.avgP.toFixed(1)}</td>`;
+                        swarmTableBody.appendChild(tr);
+                    });
+                }
+            }
+
+            function draw() {
+                ctx.fillStyle = '#111827'; 
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                const scale = canvas.width / AREA; 
+
+                if (MODE === 'ISHIDA') {
+                    ctx.save();
+                    ctx.translate(canvas.width / 2, canvas.height / 2); ctx.rotate(degToRad(CMD_ANGLE));
+                    ctx.strokeStyle = 'rgba(239, 68, 68, 0.15)'; ctx.lineWidth = 100 * scale;
+                    ctx.beginPath(); ctx.moveTo(-200 * scale, 0); ctx.lineTo(200 * scale, 0); ctx.lineTo(150 * scale, -50 * scale);
+                    ctx.moveTo(200 * scale, 0); ctx.lineTo(150 * scale, 50 * scale); ctx.stroke();
+                    ctx.restore();
+                }
+                
+                if (MODE === 'ISHIDA' && swarmData.length > 0) {
+                    swarmData.forEach(s => {
+                        const sx = s.cx * scale; const sy = s.cy * scale; const r = s.radius * scale;
+                        ctx.beginPath(); ctx.strokeStyle = 'rgba(52, 211, 153, 0.3)'; ctx.lineWidth = 1;
+                        ctx.arc(sx, sy, Math.max(5, r), 0, Math.PI * 2); ctx.stroke();
+                        ctx.fillStyle = 'rgba(52, 211, 153, 0.1)'; ctx.fill();
+                        ctx.fillStyle = '#34d399'; ctx.font = '10px monospace';
+                        ctx.fillText(`#${s.id}`, sx + r + 2, sy);
+                    });
+                }
+
+                fishes.forEach(fish => {
+                    const sx = fish.x * scale; const sy = fish.y * scale;
+                    ctx.save(); ctx.translate(sx, sy); ctx.rotate(degToRad(fish.angle));
+
+                    let bodyColor = '#e53e3e'; let headColor = '#c53030';
+                    if (MODE === 'ISHIDA') {
+                        const p = fish.currentPotential; const normP = Math.max(0, Math.min(1, (p + 2) / 7)); 
+                        const r = Math.floor(255 * normP); const b = Math.floor(255 * (1 - normP)); const g = 100;
+                        bodyColor = `rgb(${r}, ${g}, ${b})`;
+                        headColor = `rgb(${Math.max(0, r-50)}, ${Math.max(0, g-50)}, ${Math.max(0, b-50)})`;
+                        if (fish.swarmId > 0) { ctx.shadowColor = '#34d399'; ctx.shadowBlur = 5; } else { ctx.shadowBlur = 0; }
+                    }
+
+                    ctx.strokeStyle = '#a0aec0'; ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-PICH * scale, 0); ctx.stroke();
+                    ctx.fillStyle = bodyColor; ctx.beginPath(); ctx.arc(-PICH/2 * scale, 0, 4 * scale, 0, 2 * Math.PI); ctx.fill();
+                    ctx.fillStyle = headColor; ctx.beginPath(); ctx.arc(0, 0, 3 * scale, 0, 2 * Math.PI); ctx.fill();
+                    ctx.restore();
+                });
+            }
+
+            function updateBoids(fish, neighbors) {
+                let nextState = { ...fish };
+                let boidsNeighbors = neighbors.filter(n => Math.abs(normAngle(radToDeg(Math.atan2(n.dy, n.dx)) - fish.angle)) < 120);
+                if (boidsNeighbors.length > 0) {
+                    boidsNeighbors.sort((a, b) => a.dist - b.dist);
+                    const scope = boidsNeighbors.length; const l = Math.min(scope - 1, Math.floor(Math.abs(randomGaussian()) * scope / 16));
+                    const target = boidsNeighbors[l]; const min_dist = target.dist; const otherFish = target.fish;
+                    let r_angle = 0;
+                    if (min_dist <= BOIDS_R) { 
+                        r_angle = normAngle(otherFish.angle - fish.angle); r_angle = (r_angle >= 0) ? -45.0 : 45.0; r_angle = fish.angle + 0.3 * r_angle;
+                        nextState.angle = r_angle + Math.sqrt(2.0) * 5.0 * randomGaussian(); nextState.speed = MEAN_SPEED + 1.0 * randomGaussian(); 
+                    } else if (min_dist <= BOIDS_P) { 
+                        r_angle = normAngle(otherFish.angle - fish.angle); r_angle = fish.angle + 0.4 * r_angle; 
+                        nextState.angle = r_angle + Math.sqrt(2.0) * 5.0 * randomGaussian(); nextState.speed = MEAN_SPEED + 1.0 * randomGaussian();
+                    } else if (min_dist <= BOIDS_A) { 
+                        let tAngle = radToDeg(Math.atan2(target.dy, target.dx));
+                        nextState.angle = tAngle + Math.sqrt(2.0) * 5.0 * randomGaussian(); nextState.speed = fish.speed * 1.2; 
+                    } else { nextState.angle = fish.angle + (rng.random() * 90 - 45) * 0.1; }
+                } else { nextState.angle = fish.angle + (rng.random() * 20 - 10); }
+                return nextState;
+            }
+
+            function updateIshida(fish, neighbors) {
+                let nextState = { ...fish };
+                let countSound = 0;
+                let countRadio = 0;
+
+                neighbors.forEach(n => {
+                    if (rng.random() < COMM_SUCCESS_RATE) {
+                        if (n.dist <= RANGE2_FACTOR) countRadio++;
+                        if (n.dist <= RANGE1_FACTOR) countSound++;
+                    }
+                });
+
+                // Raw potential from the local communication counts.
+                const rawP = countRadio - (countSound * ISHIDA_W);
+
+                // Robust potential: exponential moving average.
+                // Pbar_t = (1 - alpha) * Pbar_{t-1} + alpha * P_t
+                const prevPbar = Number.isFinite(fish.smoothedPotential) ? fish.smoothedPotential : rawP;
+                const pbar = (1 - POTENTIAL_EMA_ALPHA) * prevPbar + POTENTIAL_EMA_ALPHA * rawP;
+                const deltaPbar = pbar - prevPbar;
+
+                nextState.rawPotential = rawP;
+                nextState.prevPotential = prevPbar;        // backward-compatible name
+                nextState.prevSmoothedPotential = prevPbar;
+                nextState.currentPotential = pbar;         // display and analysis use Pbar
+                nextState.smoothedPotential = pbar;
+
+                // Hysteresis for stable/searching state.
+                let isStable = !!fish.isPotentialStable;
+                if (!isStable && pbar >= P_STABLE_ENTER) {
+                    isStable = true;
+                } else if (isStable && pbar < P_STABLE_EXIT) {
+                    isStable = false;
+                }
+                nextState.isPotentialStable = isStable;
+
+                // Count consecutive decreases of the smoothed potential.
+                let negativeDeltaCount = fish.negativeDeltaCount || 0;
+                if (deltaPbar < -DELTA_P_EPSILON) {
+                    negativeDeltaCount += 1;
+                } else if (deltaPbar > DELTA_P_EPSILON) {
+                    negativeDeltaCount = 0;
+                }
+
+                let targetAngle = fish.angle;
+                let isTurningByPotentialDrop = false;
+                const hasCommand = rng.random() < CMD_SUCCESS_RATE;
+
+                if (isStable) {
+                    // Stable swarming state: short communication losses do not immediately cancel stability.
+                    targetAngle = hasCommand ? CMD_ANGLE : fish.angle;
+                } else {
+                    let highPotentialVectorAngle = fish.angle;
+
+                    if (deltaPbar > DELTA_P_EPSILON) {
+                        // Moving toward a better potential region; keep the current direction.
+                        highPotentialVectorAngle = fish.angle;
+                    } else if (deltaPbar < -DELTA_P_EPSILON) {
+                        // One or two decreases: small turn. Consecutive decreases: large turn.
+                        const turnDir = rng.random() < 0.5 ? 1 : -1;
+                        let turnMag;
+                        if (negativeDeltaCount >= NEGATIVE_DELTA_LIMIT) {
+                            turnMag = HARD_TURN_MIN_DEG + rng.random() * (HARD_TURN_MAX_DEG - HARD_TURN_MIN_DEG);
+                            negativeDeltaCount = 0; // require another consecutive sequence before the next large turn
+                        } else {
+                            turnMag = rng.random() * SOFT_TURN_MAX_DEG;
+                        }
+                        highPotentialVectorAngle = normAngle(fish.angle + (turnDir * turnMag));
+                        isTurningByPotentialDrop = true;
+                    } else {
+                        // Near-zero change: weak random exploration.
+                        highPotentialVectorAngle = fish.angle + (rng.random() * 20 - 10);
+                    }
+
+                    if (isTurningByPotentialDrop) {
+                        targetAngle = highPotentialVectorAngle;
+                    } else if (hasCommand) {
+                        const vx_pot = Math.cos(degToRad(highPotentialVectorAngle));
+                        const vy_pot = Math.sin(degToRad(highPotentialVectorAngle));
+                        const vx_cmd = Math.cos(degToRad(CMD_ANGLE));
+                        const vy_cmd = Math.sin(degToRad(CMD_ANGLE));
+                        const vx_final = (1 - MIX_WEIGHT) * vx_pot + MIX_WEIGHT * vx_cmd;
+                        const vy_final = (1 - MIX_WEIGHT) * vy_pot + MIX_WEIGHT * vy_cmd;
+                        targetAngle = radToDeg(Math.atan2(vy_final, vx_final));
+                    } else {
+                        targetAngle = highPotentialVectorAngle;
+                    }
+                }
+
+                nextState.negativeDeltaCount = negativeDeltaCount;
+
+                if (isTurningByPotentialDrop) {
+                    nextState.angle = targetAngle;
+                } else {
+                    const diff = normAngle(targetAngle - fish.angle);
+                    nextState.angle = fish.angle + diff * 0.1;
+                }
+
+                nextState.angle += rng.random() * 4 - 2;
+                nextState.speed = MEAN_SPEED;
+                nextState.swarmId = fish.swarmId;
+                return nextState;
+            }
+
+            function update() {
+                if (!isRunning) return;
+
+                if (iterate >= MAX_ITERATIONS) {
+                    isRunning = false;
+                    exportParametersCSV();
+                    exportTimeSeriesCSV();
+                    return; 
+                }
+
+                const nextFishes = []; const DELTA_T = 0.1;
+                for (let i = 0; i < FISH_NUM; i++) {
+                    const fish = fishes[i]; let neighbors = [];
+                    for (let j = 0; j < FISH_NUM; j++) {
+                        if (i === j) continue;
+                        const rel = getDistance(fish, fishes[j]); neighbors.push({ fish: fishes[j], dist: rel.dist, dx: rel.dx, dy: rel.dy });
+                    }
+                    let nextState;
+                    if (MODE === 'BOIDS') { nextState = updateBoids(fish, neighbors); } else { nextState = updateIshida(fish, neighbors); }
+                    nextFishes.push(nextState);
+                }
+
+                for (let i = 0; i < FISH_NUM; i++) {
+                    fishes[i] = nextFishes[i]; fishes[i].angle = normAngle(fishes[i].angle);
+                    let speed = Math.max(0.5, Math.min(MEAN_SPEED * 3, fishes[i].speed));
+                    let newX = fishes[i].x + speed * Math.cos(degToRad(fishes[i].angle)) * DELTA_T * 10;
+                    let newY = fishes[i].y + speed * Math.sin(degToRad(fishes[i].angle)) * DELTA_T * 10;
+                    if (newX < 0) newX += AREA; if (newX >= AREA) newX -= AREA;
+                    if (newY < 0) newY += AREA; if (newY >= AREA) newY -= AREA;
+                    fishes[i].x = newX; fishes[i].y = newY;
+                }
+
+                const globalAvgP = analyzeSwarms();
+                recordTimeSeriesData(iterate, globalAvgP);
+                if (iterate % 5 === 0) { updateStatsUI(globalAvgP); }
+
+                iterate++; iterationCounter.textContent = iterate; document.getElementById('fishCountDisplay').textContent = FISH_NUM;
+                draw();
+
+                if (IMAGE_INTERVAL > 0 && iterate % IMAGE_INTERVAL === 0) {
+                    saveCanvasImage(`step_${iterate}_seed${CURRENT_SEED}_${currentRunId}.png`);
+                }
+                animationFrameId = requestAnimationFrame(update);
+            }
+
+            let isDraggingKnob = false;
+            function updateKnob(angle) {
+                CMD_ANGLE = normAngle(angle); knobArrow.style.transform = `translate(-50%, -50%) rotate(${CMD_ANGLE}deg)`;
+                cmdAngleDisplay.textContent = Math.round(CMD_ANGLE < 0 ? CMD_ANGLE + 360 : CMD_ANGLE) + '°';
+            }
+            directionKnob.addEventListener('mousedown', (e) => { isDraggingKnob = true; updateKnobFromEvent(e); });
+            window.addEventListener('mousemove', (e) => { if(isDraggingKnob) updateKnobFromEvent(e); });
+            window.addEventListener('mouseup', () => { isDraggingKnob = false; });
+            function updateKnobFromEvent(e) {
+                const rect = directionKnob.getBoundingClientRect(); const centerX = rect.left + rect.width / 2; const centerY = rect.top + rect.height / 2;
+                const angleRad = Math.atan2(e.clientY - centerY, e.clientX - centerX); const angleDeg = radToDeg(angleRad); updateKnob(angleDeg);
+            }
+
+            function setMode(newMode) {
+                MODE = newMode;
+                if (MODE === 'BOIDS') {
+                    modeBoidsBtn.classList.replace('text-gray-400', 'text-white'); modeBoidsBtn.classList.add('bg-blue-600', 'shadow-sm');
+                    modeIshidaBtn.classList.remove('bg-emerald-600', 'shadow-sm', 'text-white'); modeIshidaBtn.classList.add('text-gray-400');
+                    controlsBoids.classList.remove('hidden'); controlsIshida.classList.add('hidden'); ishidaLegend.classList.add('hidden');
+                    analysisOverlay.classList.add('hidden'); analysisPanel.classList.add('hidden');
+                    modeDisplay.innerHTML = '<i data-lucide="fish" class="w-4 h-4 text-blue-400"></i> Boids Model';
+                } else {
+                    modeIshidaBtn.classList.replace('text-gray-400', 'text-white'); modeIshidaBtn.classList.add('bg-emerald-600', 'shadow-sm');
+                    modeBoidsBtn.classList.remove('bg-blue-600', 'shadow-sm', 'text-white'); modeBoidsBtn.classList.add('text-gray-400');
+                    controlsBoids.classList.add('hidden'); controlsIshida.classList.remove('hidden'); ishidaLegend.classList.remove('hidden');
+                    analysisOverlay.classList.remove('hidden'); analysisPanel.classList.remove('hidden');
+                    modeDisplay.innerHTML = '<i data-lucide="cpu" class="w-4 h-4 text-emerald-400"></i> Ishida Model (Robot)';
+                }
+                lucide.createIcons(); init();
+            }
+
+            modeBoidsBtn.addEventListener('click', () => setMode('BOIDS')); modeIshidaBtn.addEventListener('click', () => setMode('ISHIDA'));
+
+            startBtn.addEventListener('click', () => {
+                if (!isRunning && iterate < MAX_ITERATIONS) { 
+                    if (iterate === 0 && IMAGE_INTERVAL > 0) {
+                        draw(); saveCanvasImage(`step_0_seed${CURRENT_SEED}_${currentRunId}.png`);
+                    }
+                    isRunning = true; update(); 
+                }
+            });
+            stopBtn.addEventListener('click', () => { isRunning = false; cancelAnimationFrame(animationFrameId); });
+            resetBtn.addEventListener('click', () => { isRunning = false; cancelAnimationFrame(animationFrameId); init(); });
+
+            maxIterationInput.addEventListener('change', () => { MAX_ITERATIONS = parseInt(maxIterationInput.value) || 2000; maxIterDisplayOverlay.textContent = MAX_ITERATIONS; });
+            imageIntervalInput.addEventListener('change', () => { IMAGE_INTERVAL = parseInt(imageIntervalInput.value) || 0; });
+
+            function setupSlider(id, targetVarName, displayId, isFloat = false, fractionDigits = 1) {
+                const slider = document.getElementById(id); const display = document.getElementById(displayId);
+                slider.addEventListener('input', (e) => {
+                    const val = isFloat ? parseFloat(e.target.value) : parseInt(e.target.value);
+                    display.textContent = isFloat ? val.toFixed(fractionDigits) : val;
+                    switch(targetVarName) {
+                        case 'FISH_NUM': FISH_NUM = val; break; case 'MEAN_SPEED': MEAN_SPEED = val; break;
+                        case 'BOIDS_R': BOIDS_R = val; break; case 'BOIDS_P': BOIDS_P = val; break; case 'BOIDS_A': BOIDS_A = val; break;
+                        case 'RANGE1_FACTOR': RANGE1_FACTOR = val; break; case 'RANGE2_FACTOR': RANGE2_FACTOR = val; break;
+                        case 'ISHIDA_W': ISHIDA_W = val; break; case 'MIX_WEIGHT': MIX_WEIGHT = val; break;
+                        case 'POTENTIAL_EMA_ALPHA': POTENTIAL_EMA_ALPHA = val; break; case 'P_STABLE_ENTER': P_STABLE_ENTER = val; break;
+                        case 'P_STABLE_EXIT': P_STABLE_EXIT = val; break; case 'NEGATIVE_DELTA_LIMIT': NEGATIVE_DELTA_LIMIT = val; break;
+                        case 'CMD_SUCCESS_RATE': CMD_SUCCESS_RATE = val; break; case 'COMM_SUCCESS_RATE': COMM_SUCCESS_RATE = val; break;
+                    }
+                    if (targetVarName === 'FISH_NUM') init();
+                });
+            }
+
+            setupSlider('fishNumSlider', 'FISH_NUM', 'fishNumValue'); setupSlider('meanSpeedSlider', 'MEAN_SPEED', 'meanSpeedValue', true);
+            setupSlider('repulsiveSlider', 'BOIDS_R', 'repulsiveValue'); setupSlider('parallelSlider', 'BOIDS_P', 'parallelValue'); setupSlider('attractionSlider', 'BOIDS_A', 'attractionValue');
+            setupSlider('range1Slider', 'RANGE1_FACTOR', 'range1Value'); setupSlider('range2Slider', 'RANGE2_FACTOR', 'range2Value');
+            setupSlider('ishidaWSlider', 'ISHIDA_W', 'ishidaWValue', true); setupSlider('mixWeightSlider', 'MIX_WEIGHT', 'mixWeightValue', true);
+            setupSlider('potentialAlphaSlider', 'POTENTIAL_EMA_ALPHA', 'potentialAlphaValue', true, 2);
+            setupSlider('pEnterSlider', 'P_STABLE_ENTER', 'pEnterValue', true, 1); setupSlider('pExitSlider', 'P_STABLE_EXIT', 'pExitValue', true, 1);
+            setupSlider('negDeltaLimitSlider', 'NEGATIVE_DELTA_LIMIT', 'negDeltaLimitValue');
+            setupSlider('cmdSuccessSlider', 'CMD_SUCCESS_RATE', 'cmdSuccessValue', true, 2); setupSlider('commSuccessSlider', 'COMM_SUCCESS_RATE', 'commSuccessValue', true, 2);
+
+            window.addEventListener('resize', () => { if(!isRunning) draw(); });
+            updateKnob(0); setMode('BOIDS'); init();
+        });
+    </script>
+</body>
+</html>
